@@ -1,0 +1,7 @@
+{
+  "name": "Inventory Mate",
+  "description": "A local project-based inventory management tool with CSV support and barcode scanning capabilities.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
