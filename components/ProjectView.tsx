@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Project, InventoryItem } from '../types';
 import * as StorageService from '../services/storageService';
-import { ArrowLeft, Upload, Download, Scan, CheckCircle, AlertTriangle, Search } from 'lucide-react';
-import ScannerModal from './ScannerModal';
+import { ArrowLeft, Upload, Download, CheckCircle, AlertTriangle, Search, Barcode } from 'lucide-react';
 
 interface ProjectViewProps {
   projectId: string;
@@ -11,8 +10,8 @@ interface ProjectViewProps {
 
 const ProjectView: React.FC<ProjectViewProps> = ({ projectId, onBack }) => {
   const [project, setProject] = useState<Project | undefined>(undefined);
+  const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [lastScannedCode, setLastScannedCode] = useState<string | null>(null);
   const [manualCode, setManualCode] = useState('');
   const manualInputRef = useRef<HTMLInputElement>(null);
@@ -28,9 +27,11 @@ const ProjectView: React.FC<ProjectViewProps> = ({ projectId, onBack }) => {
     }
   }, [project?.isLocked]);
 
-  const loadProject = () => {
-    const data = StorageService.getProjectById(projectId);
+  const loadProject = async () => {
+    setLoading(true);
+    const data = await StorageService.getProjectById(projectId);
     setProject(data);
+    setLoading(false);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -38,7 +39,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({ projectId, onBack }) => {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       const text = event.target?.result as string;
       if (!text) return;
 
@@ -49,7 +50,6 @@ const ProjectView: React.FC<ProjectViewProps> = ({ projectId, onBack }) => {
       
       const items: InventoryItem[] = dataLines.map(line => {
         const parts = line.split(',');
-        // Handle basic CSV escaping roughly or assume clean data
         return {
           name: parts[0]?.trim() || 'Necunoscut',
           code: parts[1]?.trim() || 'Necunoscut',
@@ -58,7 +58,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({ projectId, onBack }) => {
         };
       }).filter(item => item.code !== 'Necunoscut');
 
-      StorageService.updateProjectItems(projectId, items);
+      await StorageService.updateProjectItems(projectId, items);
       loadProject();
     };
     reader.readAsText(file);
@@ -80,7 +80,7 @@ const ProjectView: React.FC<ProjectViewProps> = ({ projectId, onBack }) => {
     window.URL.revokeObjectURL(url);
   };
 
-  const processScan = (code: string) => {
+  const processScan = async (code: string) => {
     if (!project) return;
     
     const items = [...project.items];
@@ -89,7 +89,8 @@ const ProjectView: React.FC<ProjectViewProps> = ({ projectId, onBack }) => {
     if (itemIndex !== -1) {
       items[itemIndex].actualQty += 1;
       items[itemIndex].lastScannedAt = new Date().toISOString();
-      StorageService.updateProjectItems(projectId, items);
+      await StorageService.updateProjectItems(projectId, items);
+      // Optimistic update locally
       setProject(prev => prev ? { ...prev, items } : undefined);
       setLastScannedCode(code);
     } else {
@@ -105,7 +106,8 @@ const ProjectView: React.FC<ProjectViewProps> = ({ projectId, onBack }) => {
     }
   };
 
-  if (!project) return <div className="p-8 text-center text-gray-400">Se încarcă...</div>;
+  if (loading) return <div className="p-8 text-center text-gray-400">Se încarcă proiectul...</div>;
+  if (!project) return <div className="p-8 text-center text-red-400">Proiectul nu a fost găsit.</div>;
 
   const filteredItems = project.items.filter(item => 
     item.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
@@ -182,35 +184,34 @@ const ProjectView: React.FC<ProjectViewProps> = ({ projectId, onBack }) => {
                </div>
             </div>
 
-            {/* Scanning Area */}
-            <div className="bg-gray-800 p-4 rounded-xl border border-gray-700 shadow-sm flex flex-col md:flex-row gap-4 items-center">
-                <div className="flex-1 w-full relative">
-                    <form onSubmit={handleManualSubmit} className="relative">
+            {/* Scanning Area - Manual Only */}
+            <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-sm">
+                <form onSubmit={handleManualSubmit} className="relative w-full">
+                    <div className="relative flex items-center">
+                        <div className="absolute left-4 text-gray-500">
+                            <Barcode size={24} />
+                        </div>
                         <input
                             ref={manualInputRef}
                             type="text"
                             value={manualCode}
                             onChange={(e) => setManualCode(e.target.value)}
-                            className="w-full pl-4 pr-12 py-3 bg-gray-900 border-2 border-gray-700 rounded-lg focus:border-blue-500 focus:ring-0 outline-none text-lg text-white placeholder-gray-500"
-                            placeholder="Scanează sau introdu cod..."
+                            className="w-full pl-12 pr-4 py-4 bg-gray-900 border-2 border-gray-700 rounded-lg focus:border-blue-500 focus:ring-0 outline-none text-xl text-white placeholder-gray-500 transition-all"
+                            placeholder="Scanează sau introdu cod produs..."
+                            autoComplete="off"
                         />
-                        <button type="submit" className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-gray-800 rounded-md text-gray-400 hover:bg-blue-600 hover:text-white transition-colors">
-                            <ArrowLeft size={16} className="rotate-180" />
+                        <button 
+                            type="submit" 
+                            className="absolute right-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            disabled={!manualCode.trim()}
+                        >
+                            Verifică
                         </button>
-                    </form>
-                    <p className="text-xs text-gray-500 mt-1 pl-1">
-                        Compatibil cu scanere barcode de mână (mod tastatură).
+                    </div>
+                    <p className="text-sm text-gray-500 mt-2 text-center">
+                        Focusează câmpul de mai sus pentru a utiliza scanerul de mână.
                     </p>
-                </div>
-                <div className="w-full md:w-auto">
-                    <button 
-                        onClick={() => setIsScannerOpen(true)}
-                        className="w-full md:w-auto flex items-center justify-center gap-2 bg-blue-600 text-white py-3 px-6 rounded-lg hover:bg-blue-700 transition-colors shadow-lg shadow-blue-900/20 font-medium"
-                    >
-                        <Scan size={20} />
-                        <span>Folosește Camera</span>
-                    </button>
-                </div>
+                </form>
             </div>
             
             {/* Last Scanned Feedback */}
@@ -286,16 +287,6 @@ const ProjectView: React.FC<ProjectViewProps> = ({ projectId, onBack }) => {
           </>
         )}
       </div>
-
-      {isScannerOpen && (
-          <ScannerModal 
-            onScan={(code) => {
-                processScan(code);
-                setIsScannerOpen(false);
-            }}
-            onClose={() => setIsScannerOpen(false)}
-          />
-      )}
     </div>
   );
 };
